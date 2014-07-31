@@ -118,7 +118,7 @@ void AStar<CostCalculatorType>::processSuccessor(std::size_t prevIndex, const No
 					pos,
 					target);
 
-	if( pos.x<=0 || pos.x>=_limits.x-1 || pos.y<=0 || pos.y>=_limits.y-1 )
+	if( pos.x<=0 || pos.x>=_limits.x-1 || pos.y<=0 || pos.y>=_limits.y-1 || costs>=10000 )
 		return;
 
 	if( _closedSet.find(pos)==_closedSet.end() ) {

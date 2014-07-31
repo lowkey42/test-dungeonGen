@@ -33,7 +33,7 @@ struct DungeonCfg {
 
 constexpr DungeonCfg DUNGEON_LEVELS[] {
 	{{50,50}, {{7,7}, {10,10}}, 10, false, 0, false },
-	{{64,64}, {{5,5}, {10,10}}, 30, true, 3, false },
+	{{164,64}, {{5,5}, {10,10}}, 50, true, 3, false },
 
 	// ...
 	{{64,64}, {{10,10}, {20,20}}, 20, true, 17, true }
@@ -364,18 +364,26 @@ void buildCorridors(Map& map, std::mt19937& rng) {
 				result+=10;
 
 				if( map.get(prev).type==TileType::WALL )
-					result+=10;
+					result+=400;
 
 				result+= 10* countNeighbores(map,node+(node-prev),1,[](const Tile& t){return t.type==TileType::WALL;}) +
 						 10* countNeighbores(map,node-(node-prev),1,[](const Tile& t){return t.type==TileType::WALL;}) +
-							2 * countNeighbores(map,node+((node-prev)*2),1,[](const Tile& t){return t.type==TileType::WALL;}) +
+							2 * countNeighbores(map,node+((node-prev)*2),1,[](const Tile& t){return t.type==TileType::WALL;})+
 							1 * countNeighbores(map,node,1,[](const Tile& t){return t.type==TileType::WALL;});
+
+
+				{
+					Position ln{node.x-1, node.y}, rn{node.x+1, node.y}, tn{node.x, node.y-1}, bn{node.x, node.y+1};
+
+					result+= (ln==prev || rn==prev || map.get(ln).type != map.get(rn).type) &&
+							 (tn==prev || bn==prev || map.get(tn).type != map.get(bn).type) ? 10000 : 0;
+				}
 
 				break;
 
 			case TileType::NOTHING:
-				if( countNeighbores(map,node,2,[](const Tile& t){return t.type==TileType::WALL;})>0 )
-					result+= 100;
+				if( countNeighbores(map,node,2,[](const Tile& t){return t.type==TileType::WALL;})>3 )
+					result+= (countNeighbores(map,node,2,[](const Tile& t){return t.type==TileType::WALL;})-3) *5;
 
 				if( prevPrev.x!=node.x && prevPrev.y!=node.y )
 					result+=2;
