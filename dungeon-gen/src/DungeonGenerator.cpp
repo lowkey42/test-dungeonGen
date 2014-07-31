@@ -85,16 +85,16 @@ void visitNeighbores( Map& map, Position pos, std::function<void(Position, Tile&
 	visitNeighbores(map,pos,1,visitor);
 }
 
-void joinRooms(Map& map, RoomId mainRoom, RoomId subRoom) {
-	for( auto y=0; y<map.height; ++y )
-		for( auto x=0; x<map.width; ++x ) {
-			auto& t = map.get(x,y);
-			if( t.roomId==subRoom )
-				t.roomId = mainRoom;
-		}
-
-	map.rooms.erase(subRoom);
-}
+//void joinRooms(Map& map, RoomId mainRoom, RoomId subRoom) {
+//	for( auto y=0; y<map.height; ++y )
+//		for( auto x=0; x<map.width; ++x ) {
+//			auto& t = map.get(x,y);
+//			if( t.roomId==subRoom )
+//				t.roomId = mainRoom;
+//		}
+//
+//	map.rooms.erase(subRoom);
+//}
 
 void buildRooms(Map& map, Range<Position> roomSizeRange, std::size_t roomCount, bool joinIntersectingRooms, std::mt19937& rng);
 
@@ -133,6 +133,13 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 		Position roomPos = genPos(rng);
 		Position roomSize = genSize(rng);
 
+		if( std::abs(roomSize.x-roomSize.y)>=5 ) {
+			if( roomSize.x<roomSize.y )
+				roomSize.x+=(roomSize.y-roomSize.x)/2;
+			else
+				roomSize.y+=(roomSize.x-roomSize.y)/2;
+		}
+
 		RoomId existingRoomId = 0;
 
 		bool joinThisRoomWithOthers = joinIntersectingRoomDistr(rng);
@@ -145,16 +152,29 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 						existingRoomId = map.get(x,y).roomId;
 
 					else if(map.get(x,y).roomId!=existingRoomId) {
-						auto sizeA = map.rooms.find(map.get(x,y).roomId)->second.size;
-						auto sizeB = map.rooms.find(existingRoomId)->second.size;
+						auto roomA = map.rooms.find(map.get(x,y).roomId);
+						auto roomB = map.rooms.find(existingRoomId);
 
-						if( sizeA.x*sizeA.y >= sizeB.x*sizeB.y )
-							joinRooms(map, existingRoomId, map.get(x,y).roomId);
-						else {
-							auto nr = map.get(x,y).roomId;
-							joinRooms(map, nr, existingRoomId);
-							existingRoomId = nr;
-						}
+						assert(roomA!=map.rooms.end());
+						assert(roomB!=map.rooms.end());
+
+						if( roomA->second.fields.size()>roomB->second.fields.size() ) {
+							existingRoomId = map.get(x,y).roomId;
+							roomA->second.addTile(Position{x,y});
+
+						} else
+							roomB->second.addTile(Position{x,y});
+
+//						auto sizeA = map.rooms.find(map.get(x,y).roomId)->second.size;
+//						auto sizeB = map.rooms.find(existingRoomId)->second.size;
+//
+//						if( sizeA.x*sizeA.y >= sizeB.x*sizeB.y )
+//							joinRooms(map, existingRoomId, map.get(x,y).roomId);
+//						else {
+//							auto nr = map.get(x,y).roomId;
+//							joinRooms(map, nr, existingRoomId);
+//							existingRoomId = nr;
+//						}
 					}
 				}
 			}
@@ -190,7 +210,8 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 					tt = TileType::FLOOR;
 
 				tile.type = tt;
-				tile.roomId = existingRoomId;
+				assert(map.rooms.find(existingRoomId)!=map.rooms.end());
+				map.rooms.find(existingRoomId)->second.addTile(Position{x,y});
 			}
 		}
 
@@ -244,17 +265,16 @@ void smoothRooms(Map& map, std::size_t runs, bool grow) {
 						if( borderRoom!=0 ) {
 							tile.type = TileType::FLOOR;
 							nextTT[y*map.width + x]=TileType::NOTHING;
-							tile.roomId = borderRoom;
+							assert(map.rooms.find(borderRoom)!=map.rooms.end());
+							auto& borderRoomRef = map.rooms.find(borderRoom)->second;
+							borderRoomRef.addTile(Position{x,y});
 
 							visitNeighbores(map, Position{x,y}, [&](Position tp, Tile& t){
 								if( t.type==TileType::WALL && countNeighbores(map, tp, [](const Tile& t){return t.type==TileType::NOTHING;})==0 ) {
 									t.type=TileType::FLOOR;
 								}
 
-								if( t.roomId!=0 && t.roomId!=borderRoom )
-									joinRooms(map, borderRoom, t.roomId);
-								else
-									t.roomId=borderRoom;
+								borderRoomRef.addTile(tp);
 							});
 						}
 					}
@@ -281,6 +301,7 @@ void buildCorridor(Map& map, Path path) {
 					tile.type = TileType::FLOOR;
 
 				if( tile.roomId!=0 ) {
+					assert(map.rooms.find(tile.roomId)!=map.rooms.end());
 					auto room = map.rooms.find(tile.roomId);
 					assert(room!=map.rooms.end());
 
@@ -340,21 +361,15 @@ void buildCorridors(Map& map, std::mt19937& rng) {
 
 		switch(nodeTile.type) {
 			case TileType::WALL:
-				result+=100;
+				result+=10;
+
 				if( map.get(prev).type==TileType::WALL )
-					result+=50;
+					result+=10;
 
-				if( nodeTile.roomId!=0 ) {
-					auto room = map.rooms.find(nodeTile.roomId);
-					assert(room!=map.rooms.end());
-
-//					if( room->second.calcMaxDoors()==1 )
-//						result+=100;
-
-					result+= 50*room->second.doorCount;
-
-//					result+= 100* static_cast<float>(room->second.doorCount) / room->second.calcMaxDoors();
-				}
+				result+= 10* countNeighbores(map,node+(node-prev),1,[](const Tile& t){return t.type==TileType::WALL;}) +
+						 10* countNeighbores(map,node-(node-prev),1,[](const Tile& t){return t.type==TileType::WALL;}) +
+							2 * countNeighbores(map,node+((node-prev)*2),1,[](const Tile& t){return t.type==TileType::WALL;}) +
+							1 * countNeighbores(map,node,1,[](const Tile& t){return t.type==TileType::WALL;});
 
 				break;
 
@@ -363,7 +378,7 @@ void buildCorridors(Map& map, std::mt19937& rng) {
 					result+= 100;
 
 				if( prevPrev.x!=node.x && prevPrev.y!=node.y )
-					result+=5;
+					result+=2;
 
 				result+=25;
 				break;
@@ -397,8 +412,6 @@ void buildCorridors(Map& map, std::mt19937& rng) {
 			return distX + distY;
 	};
 
-	int32_t roomOrder=0;
-
 	// while( notEmpty(openRooms) )
 	while( !openRooms.empty() ) {
 		// set nextRoom = findClosestRoom(currentRoom)
@@ -408,7 +421,6 @@ void buildCorridors(Map& map, std::mt19937& rng) {
 		//	buildCorridor(currentRoom, nextRoom)
 		buildCorridor( map, pathFinder.searchPath(currentRoom->getCenter(), nextRoom->getCenter()) );
 
-		currentRoom->debug= roomOrder++;
 		// currentRoom=nextRoom;
 		currentRoom = nextRoom;
 	}
@@ -448,28 +460,45 @@ RoomId Room::genNextId() {
 
 	return ++id;
 }
-Room::Room(Map& map, Position position, Position size) : id(genNextId()), position(position), size(size), doorCount(0), type(RoomType::NORMAL), map(map), maxDoors(0), debug(0) {
+Room::Room(Map& map, Position position, Position size) : id(genNextId()), position(position), size(size), doorCount(0), type(RoomType::NORMAL), map(map), maxDoors(0) {
 }
-Room::Room(Room&& o) : id(o.id), position(o.position), size(o.size), doorCount(o.doorCount), type(o.type), map(o.map), maxDoors(o.maxDoors), debug(o.debug) {
+Room::Room(Room&& o) : id(o.id), position(o.position), size(o.size), doorCount(o.doorCount), type(o.type), map(o.map), fields(std::move(o.fields)), maxDoors(o.maxDoors) {
 	o.id=0;
 }
 Room::~Room() {
 	if( id!=0 )
-		for( auto y=0; y<map.height; ++y )
-			for( auto x=0; x<map.width; ++x )
-				if( map.get(x,y).roomId==id )
-					map.get(x,y).roomId=0;
+		for( auto tp : fields )
+			map.get(tp).roomId=0;
+}
+
+void Room::addTile(Position pos) {
+	auto& tile = map.get(pos);
+	if( tile.roomId==0 ) {
+		fields.insert(pos);
+		tile.roomId = id;
+
+	} else if( tile.roomId!=id ) {
+		assert(map.rooms.find(tile.roomId)!=map.rooms.end());
+		auto otherRoom = map.rooms.find(tile.roomId);
+		fields.insert(otherRoom->second.fields.begin(), otherRoom->second.fields.end());
+		for( auto& tp : otherRoom->second.fields )
+			map.get(tp).roomId = id;
+
+		map.rooms.erase(otherRoom);
+	}
+
+	for( auto y=0; y<map.height; ++y )
+		for( auto x=0; x<map.width; ++x )
+			if( map.get(x,y).roomId==id )
+				assert( fields.find(Position{x,y})!=fields.end() );
+
 }
 
 int8_t Room::calcMaxDoors() {
 	if( maxDoors>0 )
 		return maxDoors;
 
-	uint32_t roomSize=0;
-	for( auto y=0; y<map.height; ++y )
-		for( auto x=0; x<map.width; ++x )
-			if( map.get(x,y).roomId==id )
-				roomSize++;
+	uint32_t roomSize=fields.size();
 
 	return maxDoors = static_cast<int8_t>(
 			std::log(static_cast<float>(roomSize)) /

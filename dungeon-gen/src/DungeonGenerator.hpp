@@ -29,6 +29,9 @@ struct Position {
 	Position operator/(int factor)const {
 		return Position{x/factor, y/factor};
 	}
+	Position operator*(int factor)const {
+		return Position{x*factor, y*factor};
+	}
 	bool operator==(const Position& o)const {
 		return x==o.x && y==o.y;
 	}
@@ -59,7 +62,8 @@ struct Room {
 	int8_t doorCount;
 	RoomType type;
 	Map& map;
-	int32_t debug;
+
+	std::set<Position> fields;
 
 	Room(Map& map, Position position, Position size);
 	Room(Room&& o);
