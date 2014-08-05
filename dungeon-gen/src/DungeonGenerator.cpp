@@ -33,7 +33,7 @@ struct DungeonCfg {
 
 constexpr DungeonCfg DUNGEON_LEVELS[] {
 	{{50,50}, {{7,7}, {10,10}}, 10, false, 0, false },
-	{{164,64}, {{5,5}, {10,10}}, 50, true, 3, false },
+	{{64,64}, {{3,3}, {8,8}}, 50, true, 0, false },
 
 	// ...
 	{{64,64}, {{10,10}, {20,20}}, 20, true, 17, true }
@@ -85,18 +85,9 @@ void visitNeighbores( Map& map, Position pos, std::function<void(Position, Tile&
 	visitNeighbores(map,pos,1,visitor);
 }
 
-//void joinRooms(Map& map, RoomId mainRoom, RoomId subRoom) {
-//	for( auto y=0; y<map.height; ++y )
-//		for( auto x=0; x<map.width; ++x ) {
-//			auto& t = map.get(x,y);
-//			if( t.roomId==subRoom )
-//				t.roomId = mainRoom;
-//		}
-//
-//	map.rooms.erase(subRoom);
-//}
 
 void buildRooms(Map& map, Range<Position> roomSizeRange, std::size_t roomCount, bool joinIntersectingRooms, std::mt19937& rng);
+void buildWalls(Map& map);
 
 void smoothRooms(Map& map, std::size_t runs, bool grow);
 void buildCorridors(Map& map, std::mt19937& rng);
@@ -112,22 +103,40 @@ std::unique_ptr<Map> generate(uint32_t seed, uint8_t level) {
 
 	buildRooms(*map.get(), cfg.roomSize, cfg.rooms, cfg.complexRooms, rng);
 
-	smoothRooms(*map.get(), cfg.smoothRuns, cfg.growRooms);
+	buildWalls(*map.get());
 
-	buildCorridors(*map.get(), rng);
-
-	assignRoomProperties(*map.get(), rng);
-
-	placeThings(*map.get(), rng);
+//	smoothRooms(*map.get(), cfg.smoothRuns, cfg.growRooms);
+//
+//	buildCorridors(*map.get(), rng);
+//
+//	assignRoomProperties(*map.get(), rng);
+//
+//	placeThings(*map.get(), rng);
 
 	return map;
+}
+
+void buildWalls(Map& map) {
+	for( auto y=0; y<map.height; ++y ) {
+		for( auto x=0; x<map.width; ++x ) {
+			if( map.get(x,y).type==TileType::NOTHING && countNeighbores(map, Position{x,y}, [](const Tile& t){return t.type==TileType::FLOOR;})>0 ) {
+				auto nothingCount = countNeighbores(map, Position{x,y}, [](const Tile& t){return t.type==TileType::NOTHING;});
+				if( nothingCount>0 || x==0 || y==0 || x==map.width-1 || y==map.height-1 )
+					map.get(x,y).type = TileType::WALL;
+			}
+		}
+	}
 }
 
 void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSizeRange, std::size_t roomCount, std::bernoulli_distribution joinIntersectingRoomDistr, std::mt19937& rng) {
 	uniform_pos_distribution genPos(positionRange);
 	uniform_pos_distribution genSize(roomSizeRange);
 
-	int8_t triesLeft = 50;
+	std::vector<bool> roomIntersectionAllowed(roomCount);
+	for( std::size_t i=0; i<roomCount; i++ )
+		roomIntersectionAllowed[i] = joinIntersectingRoomDistr(rng);;
+
+	int triesLeft = 200;
 
 	for( std::size_t i=0; i<roomCount; i++ ) {
 		Position roomPos = genPos(rng);
@@ -140,88 +149,36 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 				roomSize.y+=(roomSize.x-roomSize.y)/2;
 		}
 
-		RoomId existingRoomId = 0;
+		bool joinThisRoomWithOthers = roomIntersectionAllowed[i];
 
-		bool joinThisRoomWithOthers = joinIntersectingRoomDistr(rng);
-		const int dmz = 0;
+		auto free = [&](int dmz){
+			for( auto y=std::max(0,roomPos.y-dmz); y<std::min((int32_t)map.height, roomSize.y+roomPos.y+dmz*2); ++y )
+				for( auto x=std::max(0,roomPos.x-dmz); x<std::min((int32_t)map.width, roomSize.x+roomPos.x+dmz*2); ++x )
+					if( map.get(x,y).type!=TileType::NOTHING )
+						return false;
 
-		for( auto y=roomPos.y-dmz; y<roomSize.y+roomPos.y+dmz && (joinThisRoomWithOthers || existingRoomId==0); ++y ) {
-			for( auto x=roomPos.x-dmz; x<roomSize.x+roomPos.x+dmz && (joinThisRoomWithOthers || existingRoomId==0); ++x ) {
-				if(map.get(x,y).roomId!=0) {
-					if( existingRoomId==0 )
-						existingRoomId = map.get(x,y).roomId;
+			return true;
+		};
 
-					else if(map.get(x,y).roomId!=existingRoomId) {
-						auto roomA = map.rooms.find(map.get(x,y).roomId);
-						auto roomB = map.rooms.find(existingRoomId);
-
-						assert(roomA!=map.rooms.end());
-						assert(roomB!=map.rooms.end());
-
-						if( roomA->second.fields.size()>roomB->second.fields.size() ) {
-							existingRoomId = map.get(x,y).roomId;
-							roomA->second.addTile(Position{x,y});
-
-						} else
-							roomB->second.addTile(Position{x,y});
-
-//						auto sizeA = map.rooms.find(map.get(x,y).roomId)->second.size;
-//						auto sizeB = map.rooms.find(existingRoomId)->second.size;
-//
-//						if( sizeA.x*sizeA.y >= sizeB.x*sizeB.y )
-//							joinRooms(map, existingRoomId, map.get(x,y).roomId);
-//						else {
-//							auto nr = map.get(x,y).roomId;
-//							joinRooms(map, nr, existingRoomId);
-//							existingRoomId = nr;
-//						}
-					}
-				}
-			}
+		if(!joinThisRoomWithOthers && !free(3) ) {
+			if( triesLeft>0 ) {
+				i--;
+				triesLeft--;
+				continue;
+			} else
+				return;
 		}
 
-
-
-		if( existingRoomId==0 ) {
-			Room room(map, roomPos, roomSize);
-			existingRoomId = room.id;
-
-			map.rooms.insert(std::make_pair(existingRoomId, std::move(room)));
-
-		}else if( !joinThisRoomWithOthers && triesLeft>0 ) {
-			i--;
-			triesLeft--;
-			continue;
-		}
-
-		for( auto y=roomPos.y; y<roomSize.y+roomPos.y; ++y ) {
-			for( auto x=roomPos.x; x<roomSize.x+roomPos.x; ++x ) {
-				Tile& tile = map.get(x,y);
-
-				TileType tt = TileType::FLOOR;
-
-				if( y==roomPos.y || y==(roomSize.y+roomPos.y-1) || x==roomPos.x || x==(roomSize.x+roomPos.x)-1 )
-					tt = TileType::WALL;
-
-				if( tile.type != TileType::NOTHING && tile.type !=TileType::WALL  )
-					tt = TileType::FLOOR;
-
-				if( countNeighbores(map, Position{x,y}, [](const Tile& t){return t.type==TileType::FLOOR;})>4 )
-					tt = TileType::FLOOR;
-
-				tile.type = tt;
-				assert(map.rooms.find(existingRoomId)!=map.rooms.end());
-				map.rooms.find(existingRoomId)->second.addTile(Position{x,y});
-			}
-		}
-
+		for( auto y=roomPos.y; y<roomSize.y+roomPos.y; ++y )
+			for( auto x=roomPos.x; x<roomSize.x+roomPos.x; ++x )
+				map.get(x,y).type = TileType::FLOOR;
 	}
 }
 
 void buildRooms(Map& map, Range<Position> roomSizeRange, std::size_t roomCount, bool joinIntersectingRooms, std::mt19937& rng) {
 	buildRooms(map,
 			{{1, 1}, {map.width-1-roomSizeRange.max.x, map.height-1-roomSizeRange.max.y}},
-			roomSizeRange, roomCount, std::bernoulli_distribution(joinIntersectingRooms ? 0.001 : 0), rng);
+			roomSizeRange, roomCount, std::bernoulli_distribution(joinIntersectingRooms ? 0.5 : 0), rng);
 }
 
 void smoothRooms(Map& map, std::size_t runs, bool grow) {
@@ -474,9 +431,9 @@ Room::Room(Room&& o) : id(o.id), position(o.position), size(o.size), doorCount(o
 	o.id=0;
 }
 Room::~Room() {
-	if( id!=0 )
-		for( auto tp : fields )
-			map.get(tp).roomId=0;
+//	if( id!=0 )
+//		for( auto tp : fields )
+//			map.get(tp).roomId=0;
 }
 
 void Room::addTile(Position pos) {

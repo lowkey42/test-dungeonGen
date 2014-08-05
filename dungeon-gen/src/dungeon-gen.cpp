@@ -54,13 +54,9 @@ int main() {
 		for( auto x=0; x<map->width; ++x ) {
 			const auto& tile = map->get(x,y);
 
-//			if( tile.roomId!=0 && map->rooms.find(tile.roomId)->second.debug!=0 )
-//				std::cout<< (map->rooms.find(tile.roomId)->second.debug % 10);
-//			else
-
-//			if( tile.type==TileType::FLOOR && tile.roomId!=0 && tile.roomId<10 )
-//				std::cout<<(tile.roomId);
-//			else
+			if( tile.type==TileType::FLOOR && tile.roomId!=0 )
+				std::cout<<static_cast<char>(tile.roomId%('z'-'a')+'a');
+			else
 				std::cout<< tile.type;
 		}
 		std::cout<<std::endl;
