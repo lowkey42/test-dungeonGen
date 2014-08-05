@@ -33,7 +33,7 @@ struct DungeonCfg {
 
 constexpr DungeonCfg DUNGEON_LEVELS[] {
 	{{50,50}, {{7,7}, {10,10}}, 10, false, 0, false },
-	{{164,64}, {{5,5}, {10,10}}, 50, true, 3, false },
+	{{64,64}, {{5,5}, {10,10}}, 50, true, 3, false },
 
 	// ...
 	{{64,64}, {{10,10}, {20,20}}, 20, true, 17, true }
@@ -85,17 +85,6 @@ void visitNeighbores( Map& map, Position pos, std::function<void(Position, Tile&
 	visitNeighbores(map,pos,1,visitor);
 }
 
-//void joinRooms(Map& map, RoomId mainRoom, RoomId subRoom) {
-//	for( auto y=0; y<map.height; ++y )
-//		for( auto x=0; x<map.width; ++x ) {
-//			auto& t = map.get(x,y);
-//			if( t.roomId==subRoom )
-//				t.roomId = mainRoom;
-//		}
-//
-//	map.rooms.erase(subRoom);
-//}
-
 void buildRooms(Map& map, Range<Position> roomSizeRange, std::size_t roomCount, bool joinIntersectingRooms, std::mt19937& rng);
 
 void smoothRooms(Map& map, std::size_t runs, bool grow);
@@ -127,7 +116,11 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 	uniform_pos_distribution genPos(positionRange);
 	uniform_pos_distribution genSize(roomSizeRange);
 
-	int8_t triesLeft = 50;
+	std::vector<bool> roomIntersectionAllowed(roomCount);
+	for( std::size_t i=0; i<roomCount; i++ )
+		roomIntersectionAllowed[i] = joinIntersectingRoomDistr(rng);
+
+	int triesLeft = 200;
 
 	for( std::size_t i=0; i<roomCount; i++ ) {
 		Position roomPos = genPos(rng);
@@ -142,7 +135,7 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 
 		RoomId existingRoomId = 0;
 
-		bool joinThisRoomWithOthers = joinIntersectingRoomDistr(rng);
+		bool joinThisRoomWithOthers = roomIntersectionAllowed[i];
 		const int dmz = 0;
 
 		for( auto y=roomPos.y-dmz; y<roomSize.y+roomPos.y+dmz && (joinThisRoomWithOthers || existingRoomId==0); ++y ) {
@@ -164,17 +157,6 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 
 						} else
 							roomB->second.addTile(Position{x,y});
-
-//						auto sizeA = map.rooms.find(map.get(x,y).roomId)->second.size;
-//						auto sizeB = map.rooms.find(existingRoomId)->second.size;
-//
-//						if( sizeA.x*sizeA.y >= sizeB.x*sizeB.y )
-//							joinRooms(map, existingRoomId, map.get(x,y).roomId);
-//						else {
-//							auto nr = map.get(x,y).roomId;
-//							joinRooms(map, nr, existingRoomId);
-//							existingRoomId = nr;
-//						}
 					}
 				}
 			}
@@ -221,7 +203,7 @@ void buildRooms(Map& map, Range<Position> positionRange, Range<Position> roomSiz
 void buildRooms(Map& map, Range<Position> roomSizeRange, std::size_t roomCount, bool joinIntersectingRooms, std::mt19937& rng) {
 	buildRooms(map,
 			{{1, 1}, {map.width-1-roomSizeRange.max.x, map.height-1-roomSizeRange.max.y}},
-			roomSizeRange, roomCount, std::bernoulli_distribution(joinIntersectingRooms ? 0.001 : 0), rng);
+			roomSizeRange, roomCount, std::bernoulli_distribution(joinIntersectingRooms ? 0.1 : 0), rng);
 }
 
 void smoothRooms(Map& map, std::size_t runs, bool grow) {
@@ -352,8 +334,6 @@ T findAndRemove_min(std::vector<T>& c, FUNCT weightFunct) {
 }
 
 void buildCorridors(Map& map, std::mt19937& rng) {
-//	std::bernoulli_distribution doorProp(0.25);
-
 	auto pathScorer = [&](Position prevPrev, Position prev, Position node, Position goal){
 		float result = (std::abs(node.x-goal.x) + std::abs(node.y-goal.y));
 
